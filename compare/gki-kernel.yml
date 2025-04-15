@@ -34,9 +34,6 @@ on:
       revision:
         required: false
         type: string
-      version:
-        required: false
-        type: string
 
 jobs:
   build-kernel-kernelsu-susfs:
@@ -80,7 +77,7 @@ jobs:
           ccache --set-config=compression=true
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
       
-      - name: 从缓存中还原ccache
+      - name: Restore ccache from cache
         uses: actions/cache@v4
         with:
           path: ~/.ccache
@@ -88,7 +85,7 @@ jobs:
           restore-keys: |
             ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-
       
-      - name: 缓存工具链
+      - name: Cache toolchain
         id: cache-toolchain
         uses: actions/cache@v4
         with:
@@ -98,7 +95,7 @@ jobs:
           key: toolchain-${{ runner.os }}-v1
 
       # Step 2: Download toolchain if cache was not found
-      - name: 下载工具链（如果未找到缓存）
+      - name: Download toolchain (if cache not found)
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
           AOSP_MIRROR=https://android.googlesource.com
@@ -106,20 +103,25 @@ jobs:
           git clone $AOSP_MIRROR/kernel/prebuilts/build-tools -b $BRANCH --depth 1 kernel-build-tools
           git clone $AOSP_MIRROR/platform/system/tools/mkbootimg -b $BRANCH --depth 1 mkbootimg
 
-      - name: 设置环境变量
+      - name: Set environment variables
         run: |
           echo "AVBTOOL=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin/avbtool" >> $GITHUB_ENV
           echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py" >> $GITHUB_ENV
           echo "UNPACK_BOOTIMG=$GITHUB_WORKSPACE/mkbootimg/unpack_bootimg.py" >> $GITHUB_ENV
 
-      - name: 密钥设置——已经过mkppk修改
+      - name: Set boot sign key
         env:
           BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
         run: |
-            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 > ./kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
+          if [ ! -z "$BOOT_SIGN_KEY" ]; then
+            echo "$BOOT_SIGN_KEY" > ./kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
             echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+          else
+            echo "BOOT_SIGN_KEY is not set. Exiting..."
+            exit 1
+          fi
 
-      - name: 安装仓库
+      - name: Install Repo
         run: |
           # Install dependencies
           mkdir -p ./git-repo
@@ -127,7 +129,7 @@ jobs:
           chmod a+rx ./git-repo/repo
           echo "REPO=$GITHUB_WORKSPACE/./git-repo/repo" >> $GITHUB_ENV
 
-      - name: 克隆 AnyKernel3 和其他依赖项
+      - name: Clone AnyKernel3 and Other Dependencies
         run: |
           echo "Cloning AnyKernel3 and other dependencies..."
 
@@ -140,10 +142,9 @@ jobs:
           # Clone repositories using the branch names
           git clone https://github.com/WildPlusKernel/AnyKernel3.git -b "gki-2.0"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
-          git clone https://github.com/WildPlusKernel/kernel_patches.git
-          # Sukisu的补丁仓库
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
-      - name: 设置 CONFIG 环境变量
+
+      - name: Set CONFIG Environment Variable
         run: |
           # Set CONFIG dynamically based on inputs values
           CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
@@ -153,7 +154,7 @@ jobs:
 
           echo "CONFIG set to: $CONFIG"
 
-      - name: 初始化和同步内核源代码
+      - name: Initialize and Sync Kernel Source
         run: |
           echo "Creating folder for configuration: $CONFIG..."
           mkdir -p "$CONFIG"
@@ -177,61 +178,44 @@ jobs:
           $REPO --version
           $REPO --trace sync -c -j$(nproc --all) --no-tags --fail-fast
 
-      - name: 复制文件
-        if: ${{ inputs.make_release == false }}
+      - name: Copy file
         run: |
           cp -r $CONFIG source-clean-$CONFIG
 
-      - name: 上传资产
+      - name: Upload artifact
         if: ${{ inputs.make_release == false }}
         uses: actions/upload-artifact@v4
         with:
           name: source-clean-${{ env.CONFIG }}
           path: source-clean-${{ env.CONFIG }}
 
-      - name: 移除文件
-        if: ${{ inputs.make_release == false }}
+      - name: Remove file
         run: |
           rm -rf source-clean-$CONFIG
 
-      - name: 确定 KernelSU 的分支
+      - name: Determine the branch for KernelSU
         run: |
-          if [[ "${{ inputs.kernelsu_branch }}" == "Stable(标准)" ]]; then
+          if [[ "${{ inputs.kernelsu_branch }}" == "Stable" ]]; then
               echo "BRANCH=-" >> $GITHUB_ENV
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Dev(开发)" && ( "${{ inputs.kernelsu_variant }}" == "Official" || "${{ inputs.kernelsu_variant }}" == "MKSU" ) ]]; then
-              echo "BRANCH=-s main" >> $GITHUB_ENV
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Dev(开发)" && "${{ inputs.kernelsu_variant }}" == "Next" ]]; then
-              echo "BRANCH=-s next" >> $GITHUB_ENV
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Dev(开发) && ( "${{ inputs.kernelsu_variant }}" == "SukiSU" ) ]]; then
+          elif [[ "${{ inputs.kernelsu_branch }}" == "Dev" && ( "${{ inputs.kernelsu_variant }}" == "SukiSU" ) ]]; then
               echo "BRANCH=-s susfs-dev" >> $GITHUB_ENV
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Other(其他/指定)" && -n "${{ inputs.kernelsu_branch_other }}" ]]; then
+          elif [[ "${{ inputs.kernelsu_branch }}" == "Other" && -n "${{ inputs.kernelsu_branch_other }}" ]]; then
             echo "BRANCH=-s ${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
           else
-            echo "Error: Custom branch not provided for 'Other(其他/指定)'" >&2
+            echo "Error: Custom branch not provided for 'Other'" >&2
             exit 1
           fi
       
-      - name: 添加 KernelSU
+      - name: Add KernelSU
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-
-          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
-            echo "Adding KernelSU Official..."
-            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash $BRANCH
-          elif [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-            echo "Adding KernelSU Next..."
-            curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash $BRANCH
-            #curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next-susfs/kernel/setup.sh" | bash -s next-susfs
-          elif [ "${{ inputs.kernelsu_variant }}" == "MKSU" ]; then
-            echo "Adding KernelSU MKSU..."
-            curl -LSs "https://raw.githubusercontent.com/5ec1cff/KernelSU/main/kernel/setup.sh" | bash $BRANCH
-          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
+          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
             echo "Adding KernelSU SukiSU..."
             curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash $BRANCH
           fi
           
-      - name: 为 KernelSU 变体安装 SUSFS 补丁
+      - name: Apply SUSFS Patches for KernelSU Variants
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
@@ -242,31 +226,16 @@ jobs:
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./common/
           cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          #lz4k
+          #cp -r ../SukiSU_patch/other/lz4k/include/linux/* ./common/include/linux
+          #cp -r ../SukiSU_patch/other/lz4k/lib/* ./common/lib
+          #cp -r ../SukiSU_patch/other/lz4k/crypto/* ./common/crypto
 
-          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
-            echo "Applying SUSFS patches for Official KernelSU..."
-            cd ./KernelSU
-            cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
-            patch -p1 --forward < 10_enable_susfs_for_ksu.patch
-          elif [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-            echo "Applying SUSFS patches for KernelSU-Next..."
-            cd ./KernelSU-Next
-            cp ../../kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./
-            patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
-          elif [ "${{ inputs.kernelsu_variant }}" == "MKSU" ]; then
-            echo "Applying SUSFS patches for MKSU..."
-             cd ./KernelSU
-            cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
-            patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
-            
-            echo "Applying MKSU specific SUSFS patch..."
-            cp ../../kernel_patches/mksu/mksu_susfs.patch ../KernelSU/
-            patch -p1 < mksu_susfs.patch
-            cp ../../kernel_patches/mksu/fix.patch ./KernelSU/
-            patch -p1 < fix.patch
-          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
+          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
             echo "Applying SUSFS patches for SukiSU..."
              cd ./KernelSU
+            
+            
             echo "Applying SukiSU specific SUSFS patch..."
           else
             echo "Invalid KernelSU variant selected!"
@@ -277,36 +246,27 @@ jobs:
           cd ../common
           patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
 
-      - name: 应用新的HOOKS补丁
+      - name: Apply New Hooks Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG/common"
 
-          if [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-            echo "Applying hooks for KernelSU-Next..."
-            cp ../../kernel_patches/next/syscall_hooks.patch ./
-            patch -p1 -F 3 < syscall_hooks.patch
-          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
+          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
             echo "Applying hooks for SukiSU..."
             cp ../../SukiSU_patch/hooks/new_hooks.patch ./
             patch -p1 -F 3 < new_hooks.patch
           fi
+
           
-          
-      - name: 应用隐藏某特征的补丁
+      - name: Apply Hide Stuff Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG/common"
           # Apply additional patch
-          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            cp ../../SukiSU_patch/69_hide_stuff.patch ./
-            patch -p1 -F 3 < 69_hide_stuff.patch
-          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            cp ../../kernel_patches/69_hide_stuff.patch ./
-            patch -p1 -F 3 < 69_hide_stuff.patch
-          fi
+          cp ../../SukiSU_patch/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
             
-      - name: 添加SUSFS配置设置
+      - name: Add SUSFS Configuration Settings
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
@@ -315,19 +275,11 @@ jobs:
 
           # Add KSU configuration settings
           echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
-          
-          if [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-            echo "CONFIG_KSU_WITH_KPROBES=n" >> ./common/arch/arm64/configs/gki_defconfig
-          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
 
-            echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KSU_MANUAL_HOOK=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_LZ4K=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_LZ4KD=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_LZ4HC=y" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_CRYPTO_842=y" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> ./common/arch/arm64/configs/gki_defconfig
+          
           # Add SUSFS configuration settings
           echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -345,11 +297,12 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
 
-          if [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-            echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
-          else
-            echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
+
+
+          echo "CONFIG_CRYPTO_LZ4K=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_LZ4KD=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_LZ4HC=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_842=y" >> ./common/arch/arm64/configs/gki_defconfig
           
           # Add additional tmpfs config setting
           echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -362,32 +315,19 @@ jobs:
 
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
-      
-      - name: 配置 BBR
-        #if: ${{ inputs.kernel_version != '6.6' }}
-        run: |
-          cd "$CONFIG/common"
-          # Add bbrv3 config setting
-          #cp ../../kernel_patches/bbr/tcp_bbr.c ./net/ipv4/
-
-          cd ..
-          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig 
-          echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_TCP_CONG_HTCP=n" >> ./common/arch/arm64/configs/gki_defconfig 
-
-      - name: 配置内核名称
+       
+      - name: Config Kernel Name
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
 
-          sed -i '$s|echo "\$res"|echo "${{ inputs.version }}"|' ./common/scripts/setlocalversion
+          sed -i '$s|echo "\$res"|echo "\$res"|' ./common/scripts/setlocalversion
+
+
 
           # Run perl command to modify UTS_VERSION
           perl -pi -e 's{UTS_VERSION="\$\(echo \$UTS_VERSION \$CONFIG_FLAGS \$TIMESTAMP \| cut -b -\$UTS_LEN\)"}{UTS_VERSION="#1 SMP PREEMPT Sat Apr 20 04:20:00 UTC 2024"}' ./common/scripts/mkcompile_h
-          
+
           echo "Building the kernel..."
           if [ -f "build/build.sh" ]; then
             sed -i 's/-dirty//' ./common/scripts/setlocalversion
@@ -397,20 +337,18 @@ jobs:
             sed -E -i '/^CONFIG_LOCALVERSION=/ s/(.*)"$/\1"/' ./common/arch/arm64/configs/gki_defconfig
           fi
 
-      - name: 复制文件
-        if: ${{ inputs.make_release == false }}
+      - name: Copy file
         run: |
           cp -r $CONFIG source-patched-$CONFIG
 
-      - name: 上传资产
+      - name: Upload artifact
         if: ${{ inputs.make_release == false }}
         uses: actions/upload-artifact@v4
         with:
           name: source-patched-${{ env.CONFIG }}
           path: source-patched-${{ env.CONFIG }}
 
-      - name: 移除文件
-        if: ${{ inputs.make_release == false }}
+      - name: Remove file
         run: |
           rm -rf source-patched-$CONFIG
 
@@ -432,7 +370,7 @@ jobs:
             fi
             ccache --show-stats
             
-      - name: 创建Bootimgs文件夹并复制图像
+      - name: Create Bootimgs Folder and Copy Images
         if: ${{ inputs.android_version == 'android12' || inputs.android_version == 'android13' }}
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -443,11 +381,11 @@ jobs:
           cp ./$CONFIG/out/${{ inputs.android_version }}-${{ inputs.kernel_version }}/dist/Image.lz4 ./bootimgs
           cp ./$CONFIG/out/${{ inputs.android_version }}-${{ inputs.kernel_version }}/dist/Image ./
           cp ./$CONFIG/out/${{ inputs.android_version }}-${{ inputs.kernel_version }}/dist/Image.lz4 ./
-
+          
           # Create gzip of the Image file
           gzip -n -k -f -9 ./Image > ./Image.gz
 
-      - name: 创建Bootimgs文件夹并复制图像
+      - name: Create Bootimgs Folder and Copy Images
         if: ${{ inputs.android_version == 'android14' || inputs.android_version == 'android15' }}
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -462,7 +400,7 @@ jobs:
           # Create gzip of the Image file
           gzip -n -k -f -9 ./Image > ./Image.gz
 
-      - name: 创建不同格式的ZIP文件
+      - name: Create ZIP Files for Different Formats
         run: |
           echo "Creating zip files for all formats..."
           cd ./AnyKernel3
@@ -486,7 +424,7 @@ jobs:
           zip -r "../$ZIP_NAME" ./*
           rm ./Image.gz
 
-      - name: 运行boot镜像 ${{ inputs.android_version }} 编译脚本
+      - name: Run Boot Image ${{ inputs.android_version }} Build Script
         if: ${{ inputs.android_version == 'android12' }}
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -536,7 +474,7 @@ jobs:
           $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot-lz4.img --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH
           cp ./boot-lz4.img ../${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-boot-lz4.img
 
-      - name: 运行boot镜像 ${{ inputs.android_version }} 编译脚本
+      - name: Run Boot Image ${{ inputs.android_version }} Build Script
         if: ${{ inputs.android_version == 'android13' || inputs.android_version == 'android14' || inputs.android_version == 'android15' }}
         run: |
           cd bootimgs
@@ -559,7 +497,7 @@ jobs:
           $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot-lz4.img --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH
           cp ./boot-lz4.img ../${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-boot-lz4.img
 
-      - name: 上传编译资产
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ env.CONFIG }}
