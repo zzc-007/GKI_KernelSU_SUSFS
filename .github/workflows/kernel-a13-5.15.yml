@@ -39,11 +39,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu-latest is not supported
-          # - sub_level: "94"
-          #   os_patch_level: "2023-05"
-          # - sub_level: "104"
-          #   os_patch_level: "2023-07"
+          # 从谷歌提交找到补丁，修复94与104的兼容性问题
+          - sub_level: "74"
+            os_patch_level: "2023-01"
+          - sub_level: "94"
+            os_patch_level: "2023-05"
+          - sub_level: "104"
+            os_patch_level: "2023-07"
           - sub_level: "123"
             os_patch_level: "2023-11"
           #- sub_level: "137"
@@ -56,8 +58,8 @@ jobs:
           #   os_patch_level: "2024-07"
           #- sub_level: "151"
           #  os_patch_level: "2024-08"
-          #- sub_level: "167"
-          #  os_patch_level: "2024-11"
+          - sub_level: "167"
+            os_patch_level: "2024-11"
           - sub_level: "170"
             os_patch_level: "2025-01"
           #- sub_level: "178"
@@ -79,3 +81,4 @@ jobs:
       version: ${{ inputs.version || '' }}
       use_zram: ${{ inputs.use_zram }}
       use_kpm: ${{ inputs.use_kpm }}
+      supp_op: ${{ inputs.supp_op || false }}
