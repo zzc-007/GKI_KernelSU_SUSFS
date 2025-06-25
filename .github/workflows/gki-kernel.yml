@@ -220,13 +220,13 @@ jobs:
           
           case "$branch_input" in
             "Stable(标准)")
-              echo "BRANCH=-" >> $GITHUB_ENV
+              echo "BRANCH=-s susfs-main" >> $GITHUB_ENV
               ;;
             "Dev(开发)")
               case "$variant_input" in
                 "Official" | "MKSU") echo "BRANCH=-s main" >> $GITHUB_ENV ;;
                 "Next")              echo "BRANCH=-s next-susfs-dev" >> $GITHUB_ENV ;;
-                "SukiSU")           echo "BRANCH=-s susfs-main" >> $GITHUB_ENV ;;
+                "SukiSU")           echo "BRANCH=-s susfs-1.5.8" >> $GITHUB_ENV ;;
                 *) 
                   echo "错误：未定义开发分支的变体 '$variant_input'" >&2
                   exit 1
@@ -464,7 +464,11 @@ jobs:
           # Add SUSFS configuration settings
           echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          if [ "${{ inputs.kernel_version }}" != "6.6" ]; then
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
+          else
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=n" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
           echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
