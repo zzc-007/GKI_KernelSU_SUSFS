@@ -46,6 +46,12 @@ jobs:
         #- sub_level: "66"
         #  os_patch_level: "2022-01"
         #  revision: "r11"
+        #- sub_level: "81"
+        #  os_patch_level: "2022-03"
+        #  revision: "r11"
+        #- sub_level: "101"
+        #  os_patch_level: "2022-04"
+        #  revision: "r28"
         - sub_level: "136"
           os_patch_level: "2022-11"
           revision: "r15"
@@ -64,6 +70,7 @@ jobs:
         #- sub_level: "218"
         #  os_patch_level: "2024-08"
         #  revision: "r14"
+
         #- sub_level: "226"
         #  os_patch_level: "2024-11"
         #  revision: "r8"
@@ -91,3 +98,5 @@ jobs:
       version: ${{ inputs.version || '' }}
       use_zram: ${{ inputs.use_zram }}
       use_kpm: ${{ inputs.use_kpm }}
+      supp_op: ${{ inputs.supp_op || false }}
+
